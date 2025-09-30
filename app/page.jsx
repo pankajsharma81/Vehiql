@@ -153,18 +153,16 @@ export default function Home() {
 
       <section className="py-12 bg-gray-50">
         <div className="container mx-auto px-4">
-          <h2 className="text-center text-2xl font-bold mb-8">
             <h2 className="text-center text-2xl font-bold mb-8">
               Frequently Asked Questions
             </h2>
-          </h2>
 
           <Accordion type="single" collapsible className="w-full">
-            {faqItems.map((feq, idx) => {
+            {faqItems.map((faq, idx) => {
               return (
                 <AccordionItem key={idx} value={`item-${idx}`}>
-                  <AccordionTrigger>{feq.question}</AccordionTrigger>
-                  <AccordionContent>{feq.answer}</AccordionContent>
+                  <AccordionTrigger>{faq.question}</AccordionTrigger>
+                  <AccordionContent>{faq.answer}</AccordionContent>
                 </AccordionItem>
               );
             })}
