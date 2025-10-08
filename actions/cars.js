@@ -1,4 +1,10 @@
+import { db } from "@/lib/prisma";
+import { createClient } from "@/lib/supabase";
+import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { v4 as uuidv4 } from "uuid";
 
 // Function to convert File to base64
 async function fileToBase64(file) {
@@ -15,7 +21,9 @@ export async function processCarImageWithAI(file) {
     }
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "models/gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({
+      model: "models/gemini-2.5-flash",
+    });
 
     const base64Image = await fileToBase64(file);
 
@@ -104,5 +112,97 @@ export async function processCarImageWithAI(file) {
     }
   } catch (error) {
     throw new Error("Gemini API error:" + error.message);
+  }
+}
+
+export async function addCar({ carData, images }) {
+  try {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const user = await db.user.findUnique({
+      where: {
+        clerkUserId: userId,
+      },
+    });
+
+    if (!user) throw new Error("User not found");
+
+    const carId = uuidv4();
+    const folderPath = `cars/${carId}`;
+
+    const cookieStore = await cookies();
+    const supabase = createClient(cookieStore);
+
+    const imageUrls = [];
+
+    for (let i = 0; i < images.length; i++) {
+      const base64Data = images[i];
+
+      // Skip if image data is not valid
+      if (!base64Data || !base64Data.startsWith("data:image/")) {
+        console.warn("Skipping invalid image data");
+        continue;
+      }
+
+      // Extract the base64 part (remove the data:image/xyz;base64, prefix)
+      const base64 = base64Data.split(",")[1];
+      const imageBuffer = Buffer.from(base64, "base64");
+
+      // Determine file extension from the data URL
+      const mimeMatch = base64Data.match(/data:image\/([a-zA-Z0-9]+);/);
+      const fileExtension = mimeMatch ? mimeMatch[1] : "jpeg";
+
+      // create filename
+      const fileName = `image-${Date.now()}-${i}.${fileExtension}`;
+      const filePath = `${folderPath}/${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from("car-images")
+        .upload(filePath, imageBuffer, {
+          contentType: `image/${fileExtension}`,
+        });
+
+      if (error) {
+        console.log("Error uploading image:", error);
+        throw new Error(`Failed to upload image:${error.message}`);
+      }
+
+      const publicUrl = `${process.env.NEXT_PUBLIC_SUPERBASE_URL}/storage/v1/object/public/car-images/${filePath}`; //disable cache in config
+
+      imageUrls.push(publicUrl);
+    }
+
+    if (imageUrls.length === 0) {
+      throw new Error("No valid images were uploaded");
+    }
+
+    const car = await db.car.create({
+      data: {
+        id: carId,
+        make: carData.make,
+        model: carData.model,
+        year: carData.year,
+        price: carData.price,
+        mileage: carData.mileage,
+        color: carData.color,
+        fuelType: carData.fuelType,
+        transmission: carData.transmission,
+        bodyTypes: carData.bodyTypes,
+        seats: carData.seats,
+        description: carData.description,
+        status: carData.status,
+        featured: carData.featured,
+        images: imageUrls, // Store the array of image URLs
+      },
+    });
+
+    revalidatePath("/admin/cars");
+
+    return {
+      success: true,
+    };
+  } catch (error) {
+    throw new Error("Error adding car:" + error.message);
   }
 }
